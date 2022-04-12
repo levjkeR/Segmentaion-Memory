@@ -29,21 +29,22 @@ def create_task(name, size):
     with open(name, "wb") as task_file:
         # task_file.seek(size - 1)
 
-        task_file.write(bytes([i for i in range(size-1)]))
-        task_file.write(b'\0')
+        task_file.write(bytes([i + 65 for i in range(size)]))
+        # task_file.write(b'\0')
 
 
 def check_for_range(first_range_max, second_range_min):
+    print(first_range_max, second_range_min)
     if second_range_min - first_range_max == 1:
         return None
     if first_range_max + 1 == second_range_min - 1:
-        return [second_range_min - 1]
+        return [second_range_min]
     return [first_range_max + 1, second_range_min - 1]
 
 
 def get_free_addresses(size, addr_ranges):
     undistributed_addresses = []
-    # print("--", len(addr_ranges), addr_ranges)
+
     if len(addr_ranges) < 1:
         return [[0, size]]
 
@@ -111,6 +112,7 @@ class Process:
         self.segments_table = {}  # {"example": seg}
 
     def add_segment(self, name, start, size):
+        print(sum(x.size for x in self.segments_table.values()))
         if sum(x.size for x in self.segments_table.values()) == self.size:
             print(Fore.LIGHTMAGENTA_EX + f"[x] Вся память процесса размечена на сегменты!")
             print('\t\t\t\t' + Fore.LIGHTYELLOW_EX + ', '.join(self.segments_table.keys()))
@@ -131,8 +133,7 @@ class Process:
             return False
 
         for i in self.segments_table.values():
-            print(start, start+size, i.start, i.start + i.size)
-            if start in range(i.start+1, i.start + i.size) or start+size in range(i.start+1, i.start + i.size):
+            if start in range(i.start + 1, i.start + i.size) or start + size in range(i.start + 1, i.start + i.size):
                 print(
                     Fore.LIGHTBLUE_EX + f"[-] Вхождение в имющийся сегмент!\n"
                     + f"\t\t{Fore.LIGHTGREEN_EX} {[i.name, i.start, i.start + i.size]}")
@@ -141,7 +142,7 @@ class Process:
         return True
 
     def get_undistributed_addresses(self):
-        addr_ranges = sorted([i for i in [[x.start, x.start + x.size-1]
+        addr_ranges = sorted([i for i in [[x.start, x.start + x.size - 1]
                                           for x in list(self.segments_table.values())]])
         return get_free_addresses(self.size, addr_ranges)
 
@@ -163,7 +164,7 @@ class MemoryManager:
         if size > MEMORY_SIZE - 1:
             print(
                 Fore.RED + f"[!] Размер задачи выше максимального! "
-                           f"{Fore.LIGHTYELLOW_EX + str(size) + Fore.RED} > {Fore.RESET + str(MEMORY_SIZE-1)}")
+                           f"{Fore.LIGHTYELLOW_EX + str(size) + Fore.RED} > {Fore.RESET + str(MEMORY_SIZE - 1)}")
             return False
 
         self.processes_table[name] = Process(name, size)
@@ -175,6 +176,7 @@ class MemoryManager:
         return get_free_addresses(MEMORY_SIZE, usage_addr_ranges)
 
     def load_segment(self, process_name, segment_name):
+
         if process_name not in self.processes_table.keys():
             print(Fore.RED + f"[!] Неверное имя процесса")
             return False
@@ -186,11 +188,9 @@ class MemoryManager:
         segment = process.segments_table[segment_name]
         phys_addr = None
         free = self.get_free_memory()
-        print(free)
         for i in free:
-            print(i)
             if i[1] - i[0] + 1 >= segment.size:
-                phys_addr = i
+                phys_addr = [i[0], i[0] + segment.size]
                 print(Fore.LIGHTGREEN_EX + f"[+] Успех! Выделение места для сегмента " \
                                            f"'{Fore.CYAN + segment.name + Fore.LIGHTGREEN_EX}' в физической памяти "
                                            f"{Fore.BLUE + str(i)}")
@@ -200,17 +200,61 @@ class MemoryManager:
             return False
 
         self.phys_memory_table[', '.join([process_name, segment_name])] = phys_addr
-
+        print(segment.start, segment.size)
         segment_data = read_data(process_name, segment.start, segment.size)
+        print(segment_data)
         if self.memory.write(phys_addr[0], segment_data):
             segment.state = 1
             print(Fore.LIGHTGREEN_EX + f"[+] Успех! Загружен в память, область "
-                                       f"({Fore.CYAN + hex(phys_addr[0]) + Fore.LIGHTGREEN_EX}"
-                                       f":{Fore.CYAN + hex(phys_addr[1])})")
+                                       f"({Fore.CYAN + str(phys_addr[0]) + Fore.LIGHTGREEN_EX}"
+                                       f":{Fore.CYAN + str(phys_addr[1])})")
             return True
 
     def unload_segment(self):
         pass
 
 
+create_task('new', 63)
+m = MemoryManager()
+m.add_process('new')
+seg = m.processes_table['new']
+#   print(seg.get_undistributed_addresses())
+seg.add_segment('1', 0, 30)
+# # print(seg.segments_table['1'].start)
+# # # print(seg.size)
+seg.add_segment('2', 31, 32)
+print(seg.get_undistributed_addresses())
+seg.add_segment('2', 1, 2)
+# print(m.get_free_memory())
+m.load_segment('new', '1')
+m.load_segment('new', '2')
+print(m.memory.read(0, 64))
+segment_data = read_data('new', 31, 32)
+print(bytes(segment_data))
+# segment_data = read_data('new', 0, 2)
+# print(segment_data)
+# segment_data = read_data('new', 62, 2)
+# print(segment_data)
+# segment_data = read_data('new', 14, 9)
+# print(segment_data)
+# m.memory.write(0, segment_data)
+# print(m.memory.read(0, 64))
+# print("3", seg.get_undistributed_addresses())
+# seg.add_segment('4', 1, 2)
+# print("4", seg.get_undistributed_addresses())
+# f = seg.get_segment('2')
+# print(f.size)
+# segment_data = read_data('new', f.start, f.size)
+# print(segment_data)
+# m.load_segment('new', '2')
+# m.load_segment('new', '1')
+# m.load_segment('new', '3')
+# m.load_segment('new', '4')
+# # m.memory.write(0, segment_data)
+# # print(m.get_free_memory())
+# print(m.memory.read(0, 64))
+# m.memory.write(0, segment_data)
+# print(m.memory.read(0, 64))
 
+# seg.add_segment('2', 0, 1)
+# # seg.add_segment('2', 63, 1)
