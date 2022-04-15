@@ -10,18 +10,21 @@
     «памяти».
 """
 from colorama import init, Fore
-import os
+import os, cmd
 
 init(autoreset=True)  # colorama init
 
 MEMORY_SIZE = 64
 
 
-def read_data(filename, start, size):
-    with open(filename, 'rb') as file:
-        file.seek(start, 0)
-        data = file.read(size)
-    return data
+def read_bytes(filename, start, size):
+    try:
+        with open(filename, 'rb') as file:
+            file.seek(start, 0)
+            data = file.read(size)
+        return data
+    except FileExistsError:
+        print(Fore.RED + f"[!] ")
 
 
 def create_task(name, size):
@@ -63,6 +66,7 @@ def search_ranges(size, addr_ranges):
             undistributed_addresses.append([addr_ranges[-1][1] + 1, size])
     return undistributed_addresses if len(undistributed_addresses) > 0 else None
 
+
 # Низший уровень(физический)
 class Memory:
     def __init__(self):
@@ -94,6 +98,7 @@ class Memory:
             self.__memory[base_address + i] = byte_arr[i]
         return True
 
+
 # Сегмент памяти процесса
 class Segment:
     def __init__(self, name, start, size):
@@ -109,6 +114,7 @@ class Segment:
     #             'base': self.start,
     #             'size': self.size,
     #             'is_load'}
+
 
 # Процесс(Виртуальная память представлена файлом задачи)
 class Process:
@@ -152,7 +158,10 @@ class Process:
 
         addr_ranges = sorted([i for i in [[x.start, x.start + x.size - 1]
                                           for x in list(self.segments_table.values())]])
-        return search_ranges(self.size-1, addr_ranges)
+        return search_ranges(self.size - 1, addr_ranges)
+
+    def read_process_memory(self):
+        read_bytes(self.name)
 
     # Размер всех сегментов | для контроля памяти процессф
     def _get_segments_size(self):
@@ -165,6 +174,7 @@ class Process:
         except KeyError:
             print(Fore.RED + f"[!] Нет сегмента с именем {Fore.LIGHTYELLOW_EX + name}")
 
+
 # Менелжер памяти
 class MemoryManager:
     def __init__(self):
@@ -172,24 +182,12 @@ class MemoryManager:
         self.processes_table = {}
         self.phys_memory_table = {}  # {'segment_name': [base, size]}
 
-    # Добавить процесс(задачу) | ИМЯ ЭТО НАЗВАНИЕ ФАЙЛА
-    def add_process(self, name):
-        size = os.path.getsize(name)
-        if size > MEMORY_SIZE - 1:
-            print(
-                Fore.RED + f"[!] Размер задачи выше максимального! "
-                           f"{Fore.LIGHTYELLOW_EX + str(size) + Fore.RED} > {Fore.RESET + str(MEMORY_SIZE - 1)}")
-            return False
-
-        self.processes_table[name] = Process(name, size)
-        return True
-
-    # Получить диапозоны свободной памяти
-    def _free_memory_ranges(self):
-        usage_addr_ranges = sorted([i for i in [[x[0], x[0] + x[1] - 1]
-                                                for x in list(self.phys_memory_table.values())]])
-        usage_addr_ranges = list(dict.fromkeys([tuple(x) for x in usage_addr_ranges]))
-        return search_ranges(MEMORY_SIZE-1, usage_addr_ranges)
+    # Поиск оптимальной области в физической памяти
+    def __find_optimal(self, size):
+        free_rng = self._free_memory_ranges()
+        if free_rng is not None:
+            searched = [[info[0], size] for info in free_rng if info[1] >= size]
+            return searched[0] if len(searched) else None
 
     # поиск совпадения в физицеской памяти
     def __find_match(self, bytes_arr, size):
@@ -208,12 +206,24 @@ class MemoryManager:
             print(Fore.RED + f"[!] Нет процесса с именем {Fore.LIGHTYELLOW_EX + name}")
             return
 
-    # Поиск оптимальной области в физической памяти
-    def __find_optimal(self, size):
-        free_rng = self._free_memory_ranges()
-        if free_rng is not None:
-            searched = [[info[0], size] for info in free_rng if info[1] >= size]
-            return searched[0] if len(searched) else None
+    # Получить диапозоны свободной памяти
+    def _free_memory_ranges(self):
+        usage_addr_ranges = sorted([i for i in [[x[0], x[0] + x[1] - 1]
+                                                for x in list(self.phys_memory_table.values())]])
+        usage_addr_ranges = list(dict.fromkeys([tuple(x) for x in usage_addr_ranges]))
+        return search_ranges(MEMORY_SIZE - 1, usage_addr_ranges)
+
+    # Добавить процесс(задачу) | ИМЯ ЭТО НАЗВАНИЕ ФАЙЛА
+    def add_process(self, name):
+        size = os.path.getsize(name)
+        if size > MEMORY_SIZE - 1:
+            print(
+                Fore.RED + f"[!] Размер задачи выше максимального! "
+                           f"{Fore.LIGHTYELLOW_EX + str(size) + Fore.RED} > {Fore.RESET + str(MEMORY_SIZE - 1)}")
+            return False
+
+        self.processes_table[name] = Process(name, size)
+        return True
 
     # Загрузка сегмента в паямять по имени процесса и сегмента
     def load_segment(self, process_name, segment_name):
@@ -230,11 +240,11 @@ class MemoryManager:
         if segment is None:
             return False
 
-        segment_data = read_data(process_name, segment.start, segment.size)
+        segment_data = read_bytes(process_name, segment.start, segment.size)
         match = self.__find_match(segment_data, segment.size)
 
         if match:
-            print(f"[+] Обнаружен сегмент, который уже выгружен. Изменение таблицы памяти"
+            print(f"{Fore.LIGHTMAGENTA_EX}[+] Обнаружен сегмент, который уже загружен. Изменение таблицы памяти"
                   f"\n\t\t\tСегмент '{segment.name}' == сегменту '{match[0].split(', ')[1]}' "
                   f"процесса '{match[0].split(', ')[0]}'")
             self.phys_memory_table[', '.join([process_name, segment_name])] = self.phys_memory_table[match[0]]
@@ -243,7 +253,7 @@ class MemoryManager:
 
         phys_addr = self.__find_optimal(segment.size)
         if phys_addr is None:
-            print(Fore.LIGHTYELLOW_EX + f"[x] В данный момент нет места для сегмента '{Fore.CYAN + segment.name}'")
+            print(Fore.LIGHTYELLOW_EX + f"[x] В данный момент нет места для сегмента '{Fore.CYAN + segment.name}'\n")
             return False
         else:
             print(Fore.LIGHTGREEN_EX + f"[+] Успех! Выделение места для сегмента " \
@@ -254,8 +264,8 @@ class MemoryManager:
         if self.memory.write(phys_addr[0], segment_data):
             segment.is_load = True
             print(Fore.LIGHTGREEN_EX + f"[+] Успех! Загружен в память, область "
-                                       f"{Fore.CYAN + '[' +str(phys_addr[0])}:"
-                                       f"{Fore.CYAN + str(phys_addr[1] + phys_addr[0] - 1)}]")
+                                       f"{Fore.CYAN + '[' + str(phys_addr[0])}:"
+                                       f"{Fore.CYAN + str(phys_addr[1] + phys_addr[0] - 1)}]\n")
             return True
 
     # Выгрузить сегмент из памяти
@@ -270,16 +280,100 @@ class MemoryManager:
         key = f'{process_name}, {segment_name}'
         relation = [i for i in self.phys_memory_table if self.phys_memory_table[i] == self.phys_memory_table[key]]
         if len(relation) > 1:
-            print(f"{Fore.LIGHTGREEN_EX} [+] Сегменты {relation} разделены, {[key]} "
+            print(f"{Fore.LIGHTGREEN_EX}[+] Сегменты {relation} разделены, {[key]} "
                   f"выгружается без освобождения физического диапазона...")
             self.phys_memory_table.pop(key)
             segment.is_load = False
-            print(f"{Fore.LIGHTGREEN_EX} [+] Выгружен")
+            print(f"{Fore.LIGHTGREEN_EX}[+] Выгружен\n")
             return True
         phys_segment_area = self.phys_memory_table[key]
-        print(f"{Fore.LIGHTGREEN_EX} [+] Сегмент распологается в области "
-              f"[{phys_segment_area[0], phys_segment_area[0]+ phys_segment_area[1]-1}] выгружается...")
+        print(f"{Fore.LIGHTGREEN_EX}[+] Сегмент распологается в области "
+              f"[{phys_segment_area[0], phys_segment_area[0] + phys_segment_area[1] - 1}] выгружается...")
         self.phys_memory_table.pop(key)
         segment.is_load = False
-        print(f"{Fore.LIGHTGREEN_EX} [+] Выгружен")
+        print(f"{Fore.LIGHTGREEN_EX}[+] Выгружен\n")
         return True
+
+
+def __parse(opts, args):
+    i = 0
+    optargs = args[1:]
+    while i < len(optargs):
+        if optargs[i].startswith('-'):
+            break
+        i += 1
+    opts.append((args[0], optargs[:i]))
+    return opts, optargs[i:]
+
+
+def parse(args: list):
+    opts = []
+    while args and args[0].startswith('-') and args[0] != '-':
+        opts, args = __parse(opts, args)
+    return opts, args
+
+
+class ManagerShell(cmd.Cmd):
+    intro = "Добро пожаловать в интерпритатор команд Менеджера Памяти. Введите help или ? для получения информации\n"
+    prompt = Fore.LIGHTYELLOW_EX + '(manager)' + Fore.LIGHTGREEN_EX + ' & '
+    file = None
+
+    def __init__(self, manager: MemoryManager):
+        super().__init__()
+        self.manager = manager
+
+    def do_add_process(self, args):
+        try:
+            file = open(args, 'rb')
+            file.close()
+            self.manager.add_process(args)
+        except FileNotFoundError:
+            print(Fore.RED + f"[!] Нет файла с именем {args}")
+            return
+
+    def do_add(self, args):
+        print(parse(args.split()))
+
+    def do_table(self, args):
+        print(args.split('-'))
+
+
+cli = ManagerShell(MemoryManager())
+cli.cmdloop()
+
+create_task('new', 62)
+m = MemoryManager()
+m.add_process('new')
+seg = m.processes_table['new']
+seg.add_segment('1', 0, 29)
+seg.add_segment('2', 35, 20)
+seg.add_segment('3', 29, 6)
+seg.add_segment('4', 55, 7)
+
+for i in m.processes_table.values():
+    for j in i.segments_table.values():
+        print(j, '\n')
+
+m.load_segment('new', '1')
+m.load_segment('new', '2')
+m.load_segment('new', '3')
+m.load_segment('new', '4')
+print(m.memory.read(0, 64))
+for i in m.processes_table.values():
+    for j in i.segments_table.values():
+        print(j, '\n')
+
+print(m.phys_memory_table)
+m.load_segment('new', '2')
+m.unload_segment('new', '2')
+m.unload_segment('new', '1')
+m.unload_segment('new', '3')
+m.unload_segment('new', '4')
+print(m.phys_memory_table)
+print(m._free_memory_ranges())
+
+for i in m.processes_table.values():
+    for j in i.segments_table.values():
+        print(j, '\n')
+
+print(m.memory.read(0, 64))
