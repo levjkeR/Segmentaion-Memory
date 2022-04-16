@@ -67,6 +67,71 @@ def search_ranges(size, addr_ranges):
     return undistributed_addresses if len(undistributed_addresses) > 0 else None
 
 
+def short_has_arg(opt, shortopts):
+    for i in range(len(shortopts)):
+        if opt == shortopts[i] != ':':
+            return shortopts.startswith(':', i + 1)
+
+
+def short_has_arg(opt, shortopts):
+    for i in range(len(shortopts)):
+        if opt == shortopts[i] != ':':
+            return shortopts.startswith(':', i + 1)
+
+
+def __parse(opts, args, shortopts):
+    i = 0
+    optargs = args[1:]
+    if args[0][1:] in shortopts:
+        if short_has_arg(args[0][1:], shortopts):
+            while i < len(optargs) and not optargs[i].startswith('-'):
+                i += 1
+            if i > 0:
+                opts.append((args[0], optargs[:i]))
+            else:
+                print("Необходимы аргументы для " + args[0])
+                return None, None
+        else:
+            opts.append((args[0], ''))
+        return opts, optargs[i:]
+    print("Невалидный аргумент " + args[0])
+    return None, None
+
+
+def parse(args: list, shortopts: str):
+    opts = []
+    while args and args[0].startswith('-') and args[0] != '-':
+        opts, args = __parse(opts, args, shortopts)
+    return opts, args
+
+
+def pretty_table(data, cell_sep=' | ', header_separator=True) -> str:
+    rows = len(data)
+    cols = len(data[0])
+
+    col_width = []
+    for col in range(cols):
+        columns = [str(data[row][col]) for row in range(rows)]
+        col_width.append(len(max(columns, key=len)))
+
+    separator = "-+-".join('-' * n for n in col_width)
+
+    lines = []
+
+    for i, row in enumerate(range(rows)):
+        result = []
+        for col in range(cols):
+            item = str(data[row][col]).rjust(col_width[col])
+            result.append(item)
+
+        lines.append(cell_sep.join(result))
+
+        if i == 0 and header_separator:
+            lines.append(separator)
+
+    return '\n'.join(lines)
+
+
 # Низший уровень(физический)
 class Memory:
     def __init__(self):
@@ -109,11 +174,6 @@ class Segment:
 
     def __str__(self):
         return f"name: {self.name}\nbase: {self.start}\nsize: {self.size}\nis_load: {self.is_load}"
-    # def get_info(self):
-    #     return {'name': self.name,
-    #             'base': self.start,
-    #             'size': self.size,
-    #             'is_load'}
 
 
 # Процесс(Виртуальная память представлена файлом задачи)
@@ -174,6 +234,14 @@ class Process:
         except KeyError:
             print(Fore.RED + f"[!] Нет сегмента с именем {Fore.LIGHTYELLOW_EX + name}")
 
+    def table(self):
+        data = []
+        for name, segment_obj in self.segments_table.items():
+            data.append([name, segment_obj.start, segment_obj.size, segment_obj.is_load])
+        data.insert(0, ["Сегмент", "Базовый адрес", "Объем", "Загружен в память"])
+
+        return f'Процесс {self.name}  {self.size} bytes\n{pretty_table(data)}'
+
 
 # Менелжер памяти
 class MemoryManager:
@@ -215,6 +283,12 @@ class MemoryManager:
 
     # Добавить процесс(задачу) | ИМЯ ЭТО НАЗВАНИЕ ФАЙЛА
     def add_process(self, name):
+        try:
+            file = open(name, 'rb')
+            file.close()
+        except FileNotFoundError:
+            print(Fore.RED + f"[!] Нет файла с именем {Fore.LIGHTYELLOW_EX + name}")
+            return
         size = os.path.getsize(name)
         if size > MEMORY_SIZE - 1:
             print(
@@ -238,6 +312,11 @@ class MemoryManager:
 
         segment = prosess._get_segment(segment_name)
         if segment is None:
+            return False
+
+        if segment.is_load:
+            print(Fore.LIGHTBLUE_EX + f"Сегмент {Fore.LIGHTMAGENTA_EX + segment.name} "
+                                      f"{Fore.LIGHTBLUE_EX}уже загружен в физическую память")
             return False
 
         segment_data = read_bytes(process_name, segment.start, segment.size)
@@ -294,23 +373,24 @@ class MemoryManager:
         print(f"{Fore.LIGHTGREEN_EX}[+] Выгружен\n")
         return True
 
+    def proc_table(self):
+        data = []
+        for name, process_obj in self.processes_table.items():
+            data.append([name, process_obj.size, len(list(process_obj.segments_table.keys())),
+                         sum(i.size for i in process_obj.segments_table.values())])
+        data.insert(0, ["Процесс", "Объем", "Кол-во Сегментов", "Объем сегментов"])
 
-def __parse(opts, args):
-    i = 0
-    optargs = args[1:]
-    while i < len(optargs):
-        if optargs[i].startswith('-'):
-            break
-        i += 1
-    opts.append((args[0], optargs[:i]))
-    return opts, optargs[i:]
+        return f'Таблица процессов\n{pretty_table(data)}'
 
+    def mem_table(self):
+        data = []
+        for name, value in self.phys_memory_table.items():
+            data.append([name, value[0], value[1]])
 
-def parse(args: list):
-    opts = []
-    while args and args[0].startswith('-') and args[0] != '-':
-        opts, args = __parse(opts, args)
-    return opts, args
+        usage = sum([i[2] for i in data])
+        data.insert(0, ["Процесс, Сегмент", "База", "Объем"])
+
+        return f'Таблица физицеской памяти | {MEMORY_SIZE} | {usage}\n{pretty_table(data)}'
 
 
 class ManagerShell(cmd.Cmd):
@@ -322,20 +402,86 @@ class ManagerShell(cmd.Cmd):
         super().__init__()
         self.manager = manager
 
-    def do_add_process(self, args):
-        try:
-            file = open(args, 'rb')
-            file.close()
-            self.manager.add_process(args)
-        except FileNotFoundError:
-            print(Fore.RED + f"[!] Нет файла с именем {args}")
-            return
-
     def do_add(self, args):
-        print(parse(args.split()))
+        """Добавление процесса и сегментов в менеджер -p [processname] -s [name, base, size]\nПримеры:
+        \r\tadd -p processname\n\tadd -p processname -s A 0 64 """
+        opts, args = parse(args.split(), 'p:s:')
+        if opts and not args:
+            opts = {i[0]: i[1] for i in opts}
+            if not '-p' in opts.keys():
+                print("Необходимо название процесса -p processname")
+                return
+            if not '-s' in opts.keys():
+                self.manager.add_process(''.join(opts['-p']))
+                return
+            else:
+                process = self.manager._get_process(''.join(opts['-p']))
+                if process:
+                    if len(opts['-s']) % 3 == 0:
+                        segments_params = [opts['-s'][i:i + 3] for i in range(0, len(opts['-s']), 3)]
+                        for i in segments_params:
+                            if not i[1].isdigit() and not i[2].isdigit():
+                                print(f"Неверный тип данных для информации о сегментах {i}\n Пример -s str int int")
+                            else:
+                                process.add_segment(i[0], int(i[1]), int(i[2]))
+                    else:
+                        print("Лишняя информация о сегментах ", *opts['-s'][len(opts['-s']) // 3 * 3:])
+
 
     def do_table(self, args):
-        print(args.split('-'))
+        opts, args = parse(args.split(), 'p:')
+        if opts and not args:
+            opts = {i[0]: i[1] for i in opts}
+            process = self.manager._get_process(''.join(opts['-p']))
+            if process:
+                print('\n' + process.table() + '\n')
+        if not opts and args:
+            if 'mem' == ''.join(args):
+                print('\n' + self.manager.mem_table() + '\n')
+            elif 'proc' == ''.join(args):
+                print('\n' + self.manager.proc_table() + '\n')
+
+        # if len(opts) == 1 and not args:
+        #     if len(opts[0][1]) > 0 and opts[0][0] == '-p':
+        #         for i in opts[0][1]:
+        #             process = self.manager._get_process(i)
+        #             if process:
+        #                 print('\n'+process.table()+'\n')
+        #     elif opts[0][0] == '-p':
+        #         print(self.manager.proc_table())
+        #     elif opts[0][0] == '-m':
+        #         print(self.manager.mem_table())
+
+        # elif not opts and not args:
+        #     pass
+
+    def do_load(self, args):
+        shortopts = 'p:s:'
+        opts, args = parse(args.split(), shortopts)
+        if opts and not args:
+            opts = {i[0]: i[1] for i in opts}
+            if not '-p' in opts.keys():
+                print("Необходим аргумент -p")
+                return
+            elif not '-s' in opts.keys():
+                print("Необходим аргумент -s")
+                return
+            else:
+                self.manager.load_segment(''.join(opts['-p']), ''.join(opts['-s']))
+
+    def do_unload(self, args):
+        shortopts = 'p:s:'
+        opts, args = parse(args.split(), shortopts)
+        if opts and not args:
+            opts = {i[0]: i[1] for i in opts}
+            if not '-p' in opts.keys():
+                print("Необходим аргумент -p")
+                return
+            elif not '-s' in opts.keys():
+                print("Необходим аргумент -s")
+                return
+            else:
+                self.manager.unload_segment(''.join(opts['-p']), ''.join(opts['-s']))
 
 
 cli = ManagerShell(MemoryManager())
@@ -345,10 +491,17 @@ create_task('new', 62)
 m = MemoryManager()
 m.add_process('new')
 seg = m.processes_table['new']
+p = m._get_process('new')
 seg.add_segment('1', 0, 29)
+print(p.table())
 seg.add_segment('2', 35, 20)
+print(p.table())
 seg.add_segment('3', 29, 6)
+print(p.table())
 seg.add_segment('4', 55, 7)
+print(p.table())
+
+raise KeyError
 
 for i in m.processes_table.values():
     for j in i.segments_table.values():
