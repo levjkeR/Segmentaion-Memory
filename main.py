@@ -9,8 +9,8 @@
     Программа должна иметь возможность просмотра состояния моделируемой
     «памяти».
 """
-from colorama import init, Fore
-import os, cmd
+from colorama import init, Fore, Back
+import cmd
 
 init(autoreset=True)  # colorama init
 
@@ -28,11 +28,13 @@ def read_bytes(filename, start, size):
 
 
 def create_task(name, size):
-    with open(name, "wb") as task_file:
-        # task_file.seek(size - 1)
-        task_file.write(bytes([65 for i in range(size)]))
-        # task_file.write(bytes([i + 65 for i in range(size)]))
-        # task_file.write(b'\0')
+    try:
+        with open(name, "wb") as task_file:
+            task_file.write(bytes([65 for i in range(size)]))
+        print("[+] Файл создан", name)
+        return
+    except Exception:
+        print('[-] Ошибка. Файл не создан')
 
 
 def check_for_range(first_range_max, second_range_min):
@@ -73,11 +75,6 @@ def short_has_arg(opt, shortopts):
             return shortopts.startswith(':', i + 1)
 
 
-def short_has_arg(opt, shortopts):
-    for i in range(len(shortopts)):
-        if opt == shortopts[i] != ':':
-            return shortopts.startswith(':', i + 1)
-
 
 def __parse(opts, args, shortopts):
     i = 0
@@ -89,12 +86,10 @@ def __parse(opts, args, shortopts):
             if i > 0:
                 opts.append((args[0], optargs[:i]))
             else:
-                print("Необходимы аргументы для " + args[0])
                 return None, None
         else:
             opts.append((args[0], ''))
         return opts, optargs[i:]
-    print("Невалидный аргумент " + args[0])
     return None, None
 
 
@@ -254,7 +249,7 @@ class MemoryManager:
     def __find_optimal(self, size):
         free_rng = self._free_memory_ranges()
         if free_rng is not None:
-            searched = [[info[0], size] for info in free_rng if info[1] >= size]
+            searched = [[info[0], size] for info in free_rng if info[1]-info[0]+1 >= size]
             return searched[0] if len(searched) else None
 
     # поиск совпадения в физицеской памяти
@@ -323,7 +318,7 @@ class MemoryManager:
         match = self.__find_match(segment_data, segment.size)
 
         if match:
-            print(f"{Fore.LIGHTMAGENTA_EX}[+] Обнаружен сегмент, который уже загружен. Изменение таблицы памяти"
+            print(f"{Fore.LIGHTGREEN_EX}[+] Обнаружен сегмент, который уже загружен. Изменение таблицы памяти"
                   f"\n\t\t\tСегмент '{segment.name}' == сегменту '{match[0].split(', ')[1]}' "
                   f"процесса '{match[0].split(', ')[0]}'")
             self.phys_memory_table[', '.join([process_name, segment_name])] = self.phys_memory_table[match[0]]
@@ -332,7 +327,7 @@ class MemoryManager:
 
         phys_addr = self.__find_optimal(segment.size)
         if phys_addr is None:
-            print(Fore.LIGHTYELLOW_EX + f"[x] В данный момент нет места для сегмента '{Fore.CYAN + segment.name}'\n")
+            print(Fore.RED + f"[x] В данный момент нет места для сегмента '{Fore.CYAN + segment.name}'\n")
             return False
         else:
             print(Fore.LIGHTGREEN_EX + f"[+] Успех! Выделение места для сегмента " \
@@ -359,7 +354,7 @@ class MemoryManager:
         key = f'{process_name}, {segment_name}'
         relation = [i for i in self.phys_memory_table if self.phys_memory_table[i] == self.phys_memory_table[key]]
         if len(relation) > 1:
-            print(f"{Fore.LIGHTGREEN_EX}[+] Сегменты {relation} разделены, {[key]} "
+            print(f"{Fore.LIGHTGREEN_EX}[+] Сегменты {relation} разделены, {key} "
                   f"выгружается без освобождения физического диапазона...")
             self.phys_memory_table.pop(key)
             segment.is_load = False
@@ -387,32 +382,76 @@ class MemoryManager:
         for name, value in self.phys_memory_table.items():
             data.append([name, value[0], value[1]])
 
-        usage = sum([i[2] for i in data])
+        usage = list(dict.fromkeys([tuple(x) for x in [i[1:] for i in data]]))
+        usage = sum([i[1] for i in usage])
         data.insert(0, ["Процесс, Сегмент", "База", "Объем"])
 
-        return f'Таблица физицеской памяти | {MEMORY_SIZE} | {usage}\n{pretty_table(data)}'
+        return f'Таблица физицеской памяти ' \
+               f'|{Back.GREEN+Fore.BLACK+" " + str(MEMORY_SIZE)+" "+Back.RESET+Fore.RESET}|' \
+               f'{Back.YELLOW +Fore.BLACK+" " + str(usage)+" "+Fore.RESET+Back.RESET}|\n{pretty_table(data)}'
 
 
 class ManagerShell(cmd.Cmd):
-    intro = "Добро пожаловать в интерпритатор команд Менеджера Памяти. Введите help или ? для получения информации\n"
+    intro = "\tДобро пожаловать в интерпритатор команд Менеджера Памяти.\n\t\tВведите help или ? для получения " \
+            "информации\n "
     prompt = Fore.LIGHTYELLOW_EX + '(manager)' + Fore.LIGHTGREEN_EX + ' & '
     file = None
+    ruler = '-'
+    doc_header = "Задокументированные команды (введите help <command>):"
+    use_rawinput = False
 
     def __init__(self, manager: MemoryManager):
         super().__init__()
         self.manager = manager
 
-    def do_add(self, args):
-        """Добавление процесса и сегментов в менеджер -p [processname] -s [name, base, size]\nПримеры:
-        \r\tadd -p processname\n\tadd -p processname -s A 0 64 """
-        opts, args = parse(args.split(), 'p:s:')
+    def default(self, line):
+        """Called on an input line when the command prefix is not recognized.
+
+        If this method is not overridden, it prints an error message and
+        returns.
+
+        """
+        self.stdout.write('[-] Неверная команда: %s\n' % line)
+
+    def do_create(self, args, shortopts='n:s:'):
+        opts, args = parse(args.split(), shortopts)
+        if opts and not args:
+            opts = {i[0]: i[1] for i in opts}
+            if not '-n' in opts.keys():
+                print("Необходимо название -n name")
+                return
+            if not '-s' in opts.keys():
+                print("Необходим вес -s size")
+                return
+            if len(opts['-s']) > 1:
+                print("Переданы лишние аргументы -s")
+                return
+
+            if not opts['-s'][0].isdigit():
+                print("Неверный тип для -s. Введите одно число")
+                return
+            create_task(''.join(opts['-n']), int(opts['-s'][0]))
+            return
+        print(f"[{Fore.RED}*{Fore.RESET}] Необходимы обязательые аргументы")
+        self.help_create()
+
+    def help_create(self):
+        print(f"Создание файла с определенным весом [-n] {Fore.RED}name{Fore.RESET} "
+              f"[-s] {Fore.RED}size{Fore.RESET}\nПримеры: "
+              f"\n\tcreate -n task -s 64")
+
+
+
+    def do_add(self, args, shortopts='p:s:'):
+        opts, args = parse(args.split(), shortopts)
         if opts and not args:
             opts = {i[0]: i[1] for i in opts}
             if not '-p' in opts.keys():
                 print("Необходимо название процесса -p processname")
                 return
             if not '-s' in opts.keys():
-                self.manager.add_process(''.join(opts['-p']))
+                if self.manager.add_process(''.join(opts['-p'])):
+                    print(Fore.LIGHTGREEN_EX +"[+] Процесс добавлен")
                 return
             else:
                 process = self.manager._get_process(''.join(opts['-p']))
@@ -423,40 +462,41 @@ class ManagerShell(cmd.Cmd):
                             if not i[1].isdigit() and not i[2].isdigit():
                                 print(f"Неверный тип данных для информации о сегментах {i}\n Пример -s str int int")
                             else:
-                                process.add_segment(i[0], int(i[1]), int(i[2]))
+                                if process.add_segment(i[0], int(i[1]), int(i[2])):
+                                    print(Fore.LIGHTGREEN_EX + "[+] Сегмент добавлен", i[0], int(i[1]), int(i[2]))
                     else:
                         print("Лишняя информация о сегментах ", *opts['-s'][len(opts['-s']) // 3 * 3:])
+            return
+        print(f"[{Fore.RED}*{Fore.RESET}] Необходимы обязательые аргументы")
+        self.help_add()
 
+    def help_add(self):
+        print(f"Добавление процесса и сегментов в менеджер [-p] {Fore.RED}processname{Fore.RESET} "
+              f"[-s] {Fore.CYAN}name, base, size{Fore.RESET}\nПримеры: "
+              f"\n\tadd -p processname\n\tadd -p processname -s A 0 64")
 
-    def do_table(self, args):
-        opts, args = parse(args.split(), 'p:')
+    def do_table(self, args, shortopts='p:'):
+        """Вывод таблиц table [-p] [mem] [proc].\nПримеры:\n\ttable -p processname - таблица сегментов процесса
+        \r\ttable mem - таблица физической памяти\n\ttable proc - таблица процессов"""
+        opts, args = parse(args.split(), shortopts)
         if opts and not args:
             opts = {i[0]: i[1] for i in opts}
             process = self.manager._get_process(''.join(opts['-p']))
             if process:
                 print('\n' + process.table() + '\n')
+            return
         if not opts and args:
             if 'mem' == ''.join(args):
                 print('\n' + self.manager.mem_table() + '\n')
             elif 'proc' == ''.join(args):
                 print('\n' + self.manager.proc_table() + '\n')
+            return
+        print(f"[{Fore.RED}*{Fore.RESET}] Необходимы обязательые аргументы")
+        self.do_help('table')
 
-        # if len(opts) == 1 and not args:
-        #     if len(opts[0][1]) > 0 and opts[0][0] == '-p':
-        #         for i in opts[0][1]:
-        #             process = self.manager._get_process(i)
-        #             if process:
-        #                 print('\n'+process.table()+'\n')
-        #     elif opts[0][0] == '-p':
-        #         print(self.manager.proc_table())
-        #     elif opts[0][0] == '-m':
-        #         print(self.manager.mem_table())
-
-        # elif not opts and not args:
-        #     pass
-
-    def do_load(self, args):
-        shortopts = 'p:s:'
+    def do_load(self, args, shortopts='p:s:'):
+        """Загрузить сегмент в память [-p] processname [-s] name.\nПримеры:
+        \r\tload -p process name -s segment name - загрузить в память сегмент определенного процесса"""
         opts, args = parse(args.split(), shortopts)
         if opts and not args:
             opts = {i[0]: i[1] for i in opts}
@@ -468,6 +508,16 @@ class ManagerShell(cmd.Cmd):
                 return
             else:
                 self.manager.load_segment(''.join(opts['-p']), ''.join(opts['-s']))
+            return
+        print(f"[{Fore.RED}*{Fore.RESET}] Необходимы обязательые аргументы")
+        self.help_load()
+
+    def help_load(self):
+        print(f"Загрузить сегмент в память [-p] {Fore.RED}processname{Fore.RESET} [-s] {Fore.RED}name{Fore.RESET}."
+              f"\nПримеры:\n\tload -p process name -s segment name - загрузить в память сегмент определенного процесса")
+    def help_unload(self):
+        print(f"Выгрузить сегмент из памяти [-p] {Fore.RED}processname{Fore.RESET} [-s] {Fore.RED}name{Fore.RESET}."
+              f"\nПримеры:\n\tload -p process name -s segment name - загрузить в память сегмент определенного процесса")
 
     def do_unload(self, args):
         shortopts = 'p:s:'
@@ -482,51 +532,57 @@ class ManagerShell(cmd.Cmd):
                 return
             else:
                 self.manager.unload_segment(''.join(opts['-p']), ''.join(opts['-s']))
+            return
+        print(f"[{Fore.RED}*{Fore.RESET}] Необходимы обязательые аргументы")
+        self.help_unload()
 
 
 cli = ManagerShell(MemoryManager())
+import os
+
+os.system('cls' if os.name == 'nt' else 'clear')
 cli.cmdloop()
 
-create_task('new', 62)
-m = MemoryManager()
-m.add_process('new')
-seg = m.processes_table['new']
-p = m._get_process('new')
-seg.add_segment('1', 0, 29)
-print(p.table())
-seg.add_segment('2', 35, 20)
-print(p.table())
-seg.add_segment('3', 29, 6)
-print(p.table())
-seg.add_segment('4', 55, 7)
-print(p.table())
-
-raise KeyError
-
-for i in m.processes_table.values():
-    for j in i.segments_table.values():
-        print(j, '\n')
-
-m.load_segment('new', '1')
-m.load_segment('new', '2')
-m.load_segment('new', '3')
-m.load_segment('new', '4')
-print(m.memory.read(0, 64))
-for i in m.processes_table.values():
-    for j in i.segments_table.values():
-        print(j, '\n')
-
-print(m.phys_memory_table)
-m.load_segment('new', '2')
-m.unload_segment('new', '2')
-m.unload_segment('new', '1')
-m.unload_segment('new', '3')
-m.unload_segment('new', '4')
-print(m.phys_memory_table)
-print(m._free_memory_ranges())
-
-for i in m.processes_table.values():
-    for j in i.segments_table.values():
-        print(j, '\n')
-
-print(m.memory.read(0, 64))
+# create_task('new', 62)
+# m = MemoryManager()
+# m.add_process('new')
+# seg = m.processes_table['new']
+# p = m._get_process('new')
+# seg.add_segment('1', 0, 29)
+# print(p.table())
+# seg.add_segment('2', 35, 20)
+# print(p.table())
+# seg.add_segment('3', 29, 6)
+# print(p.table())
+# seg.add_segment('4', 55, 7)
+# print(p.table())
+#
+# raise KeyError
+#
+# for i in m.processes_table.values():
+#     for j in i.segments_table.values():
+#         print(j, '\n')
+#
+# m.load_segment('new', '1')
+# m.load_segment('new', '2')
+# m.load_segment('new', '3')
+# m.load_segment('new', '4')
+# print(m.memory.read(0, 64))
+# for i in m.processes_table.values():
+#     for j in i.segments_table.values():
+#         print(j, '\n')
+#
+# print(m.phys_memory_table)
+# m.load_segment('new', '2')
+# m.unload_segment('new', '2')
+# m.unload_segment('new', '1')
+# m.unload_segment('new', '3')
+# m.unload_segment('new', '4')
+# print(m.phys_memory_table)
+# print(m._free_memory_ranges())
+#
+# for i in m.processes_table.values():
+#     for j in i.segments_table.values():
+#         print(j, '\n')
+#
+# print(m.memory.read(0, 64))
