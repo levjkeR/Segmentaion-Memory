@@ -520,7 +520,6 @@ class ManagerShell(cmd.Cmd):
                         line = []
                         lines += 1
                         print('')
-                # super().columnize([str(i) for i in self.manager.memory.read(0, MEMORY_SIZE)])
             return
 
         print(f"[{Fore.RED}*{Fore.RESET}] Необходимы обязательые аргументы")
