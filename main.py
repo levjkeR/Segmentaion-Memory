@@ -14,7 +14,7 @@ import cmd
 
 init(autoreset=True)  # colorama init
 
-MEMORY_SIZE = 64
+MEMORY_SIZE = 256
 
 
 def read_bytes(filename, start, size):
@@ -129,7 +129,7 @@ def pretty_table(data, cell_sep=' | ', header_separator=True) -> str:
 # Низший уровень(физический)
 class Memory:
     def __init__(self):
-        self.__memory = list('NaN' for i in range(MEMORY_SIZE))
+        self.__memory = list(0 for i in range(MEMORY_SIZE))
 
     # Чтение памяти по адресу и размеру
     def read(self, address, bytes_count=1):
@@ -362,10 +362,15 @@ class MemoryManager:
         phys_segment_area = self.phys_memory_table[key]
         print(f"{Fore.LIGHTGREEN_EX}[+] Сегмент распологается в области "
               f"[{phys_segment_area[0], phys_segment_area[0] + phys_segment_area[1] - 1}] выгружается...")
-        self.phys_memory_table.pop(key)
         segment.is_load = False
-        print(f"{Fore.LIGHTGREEN_EX}[+] Выгружен\n")
-        return True
+
+        if self.memory.write(self.phys_memory_table[key][0], [0 for i in range(segment.size)]):
+            self.phys_memory_table.pop(key)
+            segment.is_load = False
+            print(f"{Fore.LIGHTGREEN_EX}[+] Выгружен\n")
+            return True
+
+        return False
 
     def proc_table(self):
         data = []
@@ -488,9 +493,40 @@ class ManagerShell(cmd.Cmd):
                 print('\n' + self.manager.mem_table() + '\n')
             elif 'proc' == ''.join(args):
                 print('\n' + self.manager.proc_table() + '\n')
+            elif 'all' == ''.join(args):
+                bytes, line = 0, []
+                print('   ', end='')
+                [print(Fore.LIGHTBLUE_EX+'{:^2} '.format(i)+Fore.RESET, end='') for i in range(16)]
+                print('')
+                lines = 0
+                for b in self.manager.memory.read(0, MEMORY_SIZE):
+                    if bytes % 16 == 0:
+                        print(Fore.LIGHTGREEN_EX+'{:^2}'.format(str(lines))+Fore.RESET, end=' ')
+                    bytes += 1
+                    line.append(b)
+                    # if b % 16 == 0:
+                    #     print('{:2}'.format(str(b // 16)), end='')
+                    print('{:02X}'.format(b), end=' ')
+                    if bytes % 16 == 0:
+                        print("|", end='')
+                        for b2 in line:
+                            if b2 != 0:
+                                if b2>=32 and b2 <= 126:
+                                    print(chr(b2), end='')
+                                else:
+                                    print(Back.LIGHTBLACK_EX + ".", end='')
+                            else:
+                                print(Back.LIGHTBLACK_EX + " ", end='')
+                        line = []
+                        lines += 1
+                        print('')
+                # super().columnize([str(i) for i in self.manager.memory.read(0, MEMORY_SIZE)])
             return
+
         print(f"[{Fore.RED}*{Fore.RESET}] Необходимы обязательые аргументы")
         self.do_help('table')
+
+
 
     def do_load(self, args, shortopts='p:s:'):
         """Загрузить сегмент в память [-p] processname [-s] name.\nПримеры:
