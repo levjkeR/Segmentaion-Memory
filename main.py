@@ -75,7 +75,6 @@ def short_has_arg(opt, shortopts):
             return shortopts.startswith(':', i + 1)
 
 
-
 def __parse(opts, args, shortopts):
     i = 0
     optargs = args[1:]
@@ -249,7 +248,7 @@ class MemoryManager:
     def __find_optimal(self, size):
         free_rng = self._free_memory_ranges()
         if free_rng is not None:
-            searched = [[info[0], size] for info in free_rng if info[1]-info[0]+1 >= size]
+            searched = [[info[0], size] for info in free_rng if info[1] - info[0] + 1 >= size]
             return searched[0] if len(searched) else None
 
     # поиск совпадения в физицеской памяти
@@ -387,14 +386,15 @@ class MemoryManager:
         data.insert(0, ["Процесс, Сегмент", "База", "Объем"])
 
         return f'Таблица физицеской памяти ' \
-               f'|{Back.GREEN+Fore.BLACK+" " + str(MEMORY_SIZE)+" "+Back.RESET+Fore.RESET}|' \
-               f'{Back.YELLOW +Fore.BLACK+" " + str(usage)+" "+Fore.RESET+Back.RESET}|\n{pretty_table(data)}'
+               f'|{Back.GREEN + Fore.BLACK + " " + str(MEMORY_SIZE) + " " + Back.RESET + Fore.RESET}|' \
+               f'{Back.YELLOW + Fore.BLACK + " " + str(usage) + " " + Fore.RESET + Back.RESET}|\n{pretty_table(data)}'
 
 
 class ManagerShell(cmd.Cmd):
-    intro = "\tДобро пожаловать в интерпритатор команд Менеджера Памяти.\n\t\tВведите help или ? для получения " \
-            "информации\n "
-    prompt = Fore.LIGHTYELLOW_EX + '(manager)' + Fore.LIGHTGREEN_EX + ' & '
+    intro = f"{__doc__}\n\n\tДобро пожаловать в интерпритатор команд Менеджера Памяти.\n\t\tВведите help или ? для " \
+            f"получения информации\n"
+    prompt = f'[{Fore.CYAN + str(MEMORY_SIZE)}b{Back.RESET + Fore.RESET}]{Fore.LIGHTYELLOW_EX} ' \
+             f'(manager){Fore.GREEN} & '
     file = None
     ruler = '-'
     doc_header = "Задокументированные команды (введите help <command>):"
@@ -440,8 +440,6 @@ class ManagerShell(cmd.Cmd):
               f"[-s] {Fore.RED}size{Fore.RESET}\nПримеры: "
               f"\n\tcreate -n task -s 64")
 
-
-
     def do_add(self, args, shortopts='p:s:'):
         opts, args = parse(args.split(), shortopts)
         if opts and not args:
@@ -451,7 +449,7 @@ class ManagerShell(cmd.Cmd):
                 return
             if not '-s' in opts.keys():
                 if self.manager.add_process(''.join(opts['-p'])):
-                    print(Fore.LIGHTGREEN_EX +"[+] Процесс добавлен")
+                    print(Fore.LIGHTGREEN_EX + "[+] Процесс добавлен")
                 return
             else:
                 process = self.manager._get_process(''.join(opts['-p']))
@@ -515,6 +513,7 @@ class ManagerShell(cmd.Cmd):
     def help_load(self):
         print(f"Загрузить сегмент в память [-p] {Fore.RED}processname{Fore.RESET} [-s] {Fore.RED}name{Fore.RESET}."
               f"\nПримеры:\n\tload -p process name -s segment name - загрузить в память сегмент определенного процесса")
+
     def help_unload(self):
         print(f"Выгрузить сегмент из памяти [-p] {Fore.RED}processname{Fore.RESET} [-s] {Fore.RED}name{Fore.RESET}."
               f"\nПримеры:\n\tload -p process name -s segment name - загрузить в память сегмент определенного процесса")
