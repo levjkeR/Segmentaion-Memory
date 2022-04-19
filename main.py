@@ -10,7 +10,7 @@
     «памяти».
 """
 from colorama import init, Fore, Back
-import cmd
+import cmd, os
 
 init(autoreset=True)  # colorama init
 
@@ -75,7 +75,7 @@ def short_has_arg(opt, shortopts):
             return shortopts.startswith(':', i + 1)
 
 
-def __parse(opts, args, shortopts):
+def do_short(opts, args, shortopts):
     i = 0
     optargs = args[1:]
     if args[0][1:] in shortopts:
@@ -95,7 +95,7 @@ def __parse(opts, args, shortopts):
 def parse(args: list, shortopts: str):
     opts = []
     while args and args[0].startswith('-') and args[0] != '-':
-        opts, args = __parse(opts, args, shortopts)
+        opts, args = do_short(opts, args, shortopts)
     return opts, args
 
 
@@ -129,7 +129,7 @@ def pretty_table(data, cell_sep=' | ', header_separator=True) -> str:
 # Низший уровень(физический)
 class Memory:
     def __init__(self):
-        self.__memory = list(0 for i in range(MEMORY_SIZE))
+        self.__memory = [0] * MEMORY_SIZE
 
     # Чтение памяти по адресу и размеру
     def read(self, address, bytes_count=1):
@@ -138,10 +138,7 @@ class Memory:
                 Fore.RED + f"[!] Выход за пределы адресного пространства памяти!\n"
                 + f"\t\tНевозможно прочитать по адресу больше чем {Fore.LIGHTGREEN_EX + str(MEMORY_SIZE)}")
             return
-        data = []
-        for i in range(bytes_count):
-            data.append(self.__memory[address + i])
-        return data
+        return self.__memory[address:address + bytes_count]
 
     # Запись в память массива байтов по адресу
     def write(self, base_address, byte_arr):
@@ -153,8 +150,7 @@ class Memory:
                 Fore.RED + f"[!] Выход за пределы адресного пространства памяти!\n"
                 + f"\t\tНевозможно прочитать по адресу больше чем {Fore.LIGHTGREEN_EX + str(MEMORY_SIZE)}")
             return False
-        for i in range(len(byte_arr)):
-            self.__memory[base_address + i] = byte_arr[i]
+        self.__memory[base_address:base_address + len(byte_arr)] = byte_arr
         return True
 
 
@@ -165,9 +161,6 @@ class Segment:
         self.start = start
         self.size = size
         self.is_load = False
-
-    def __str__(self):
-        return f"name: {self.name}\nbase: {self.start}\nsize: {self.size}\nis_load: {self.is_load}"
 
 
 # Процесс(Виртуальная память представлена файлом задачи)
@@ -213,9 +206,6 @@ class Process:
         addr_ranges = sorted([i for i in [[x.start, x.start + x.size - 1]
                                           for x in list(self.segments_table.values())]])
         return search_ranges(self.size - 1, addr_ranges)
-
-    def read_process_memory(self):
-        read_bytes(self.name)
 
     # Размер всех сегментов | для контроля памяти процессф
     def _get_segments_size(self):
@@ -394,6 +384,32 @@ class MemoryManager:
                f'|{Back.GREEN + Fore.BLACK + " " + str(MEMORY_SIZE) + " " + Back.RESET + Fore.RESET}|' \
                f'{Back.YELLOW + Fore.BLACK + " " + str(usage) + " " + Fore.RESET + Back.RESET}|\n{pretty_table(data)}'
 
+    def hex_view(self):
+        bytes, line = 0, []
+        print('   ', end='')
+        [print(Fore.LIGHTBLUE_EX + '{:^2} '.format(i) + Fore.RESET, end='') for i in range(16)]
+        print('')
+        lines = 0
+        for b in self.memory.read(0, MEMORY_SIZE):
+            if bytes % 16 == 0:
+                print(Fore.LIGHTGREEN_EX + '{:^2}'.format(str(lines)) + Fore.RESET, end=' ')
+            bytes += 1
+            line.append(b)
+            print('{:02X}'.format(b), end=' ')
+            if bytes % 16 == 0:
+                print("|", end='')
+                for b2 in line:
+                    if b2 != 0:
+                        if 32 <= b2 <= 126:
+                            print(chr(b2), end='')
+                        else:
+                            print(Back.LIGHTBLACK_EX + ".", end='')
+                    else:
+                        print(Back.LIGHTBLACK_EX + " ", end='')
+                line = []
+                lines += 1
+                print('')
+
 
 class ManagerShell(cmd.Cmd):
     intro = f"{__doc__}\n\n\tДобро пожаловать в интерпритатор команд Менеджера Памяти.\n\t\tВведите help или ? для " \
@@ -410,13 +426,7 @@ class ManagerShell(cmd.Cmd):
         self.manager = manager
 
     def default(self, line):
-        """Called on an input line when the command prefix is not recognized.
-
-        If this method is not overridden, it prints an error message and
-        returns.
-
-        """
-        self.stdout.write('[-] Неверная команда: %s\n' % line)
+        self.stdout.write(Fore.RED + '[-] Неверная команда: %s\n' % line)
 
     def do_create(self, args, shortopts='n:s:'):
         opts, args = parse(args.split(), shortopts)
@@ -479,8 +489,8 @@ class ManagerShell(cmd.Cmd):
               f"\n\tadd -p processname\n\tadd -p processname -s A 0 64")
 
     def do_table(self, args, shortopts='p:'):
-        """Вывод таблиц table [-p] [mem] [proc].\nПримеры:\n\ttable -p processname - таблица сегментов процесса
-        \r\ttable mem - таблица физической памяти\n\ttable proc - таблица процессов"""
+        """Вывод таблиц table [-p] [mem] [proc] [hex].\nПримеры:\n\ttable -p processname - таблица сегментов процесса
+        \r\ttable mem - таблица физической памяти\n\ttable proc - таблица процессов\n\ttable hex"""
         opts, args = parse(args.split(), shortopts)
         if opts and not args:
             opts = {i[0]: i[1] for i in opts}
@@ -493,39 +503,11 @@ class ManagerShell(cmd.Cmd):
                 print('\n' + self.manager.mem_table() + '\n')
             elif 'proc' == ''.join(args):
                 print('\n' + self.manager.proc_table() + '\n')
-            elif 'all' == ''.join(args):
-                bytes, line = 0, []
-                print('   ', end='')
-                [print(Fore.LIGHTBLUE_EX+'{:^2} '.format(i)+Fore.RESET, end='') for i in range(16)]
-                print('')
-                lines = 0
-                for b in self.manager.memory.read(0, MEMORY_SIZE):
-                    if bytes % 16 == 0:
-                        print(Fore.LIGHTGREEN_EX+'{:^2}'.format(str(lines))+Fore.RESET, end=' ')
-                    bytes += 1
-                    line.append(b)
-                    # if b % 16 == 0:
-                    #     print('{:2}'.format(str(b // 16)), end='')
-                    print('{:02X}'.format(b), end=' ')
-                    if bytes % 16 == 0:
-                        print("|", end='')
-                        for b2 in line:
-                            if b2 != 0:
-                                if b2>=32 and b2 <= 126:
-                                    print(chr(b2), end='')
-                                else:
-                                    print(Back.LIGHTBLACK_EX + ".", end='')
-                            else:
-                                print(Back.LIGHTBLACK_EX + " ", end='')
-                        line = []
-                        lines += 1
-                        print('')
+            elif 'hex' == ''.join(args):
+                self.manager.hex_view()
             return
-
         print(f"[{Fore.RED}*{Fore.RESET}] Необходимы обязательые аргументы")
         self.do_help('table')
-
-
 
     def do_load(self, args, shortopts='p:s:'):
         """Загрузить сегмент в память [-p] processname [-s] name.\nПримеры:
@@ -551,7 +533,8 @@ class ManagerShell(cmd.Cmd):
 
     def help_unload(self):
         print(f"Выгрузить сегмент из памяти [-p] {Fore.RED}processname{Fore.RESET} [-s] {Fore.RED}name{Fore.RESET}."
-              f"\nПримеры:\n\tload -p process name -s segment name - загрузить в память сегмент определенного процесса")
+              f"\nПримеры:\n\tunload -p process name -s segment name - выгрузить из памяти сегмент определенного "
+              f"процесса")
 
     def do_unload(self, args):
         shortopts = 'p:s:'
@@ -572,51 +555,6 @@ class ManagerShell(cmd.Cmd):
 
 
 cli = ManagerShell(MemoryManager())
-import os
 
 os.system('cls' if os.name == 'nt' else 'clear')
 cli.cmdloop()
-
-# create_task('new', 62)
-# m = MemoryManager()
-# m.add_process('new')
-# seg = m.processes_table['new']
-# p = m._get_process('new')
-# seg.add_segment('1', 0, 29)
-# print(p.table())
-# seg.add_segment('2', 35, 20)
-# print(p.table())
-# seg.add_segment('3', 29, 6)
-# print(p.table())
-# seg.add_segment('4', 55, 7)
-# print(p.table())
-#
-# raise KeyError
-#
-# for i in m.processes_table.values():
-#     for j in i.segments_table.values():
-#         print(j, '\n')
-#
-# m.load_segment('new', '1')
-# m.load_segment('new', '2')
-# m.load_segment('new', '3')
-# m.load_segment('new', '4')
-# print(m.memory.read(0, 64))
-# for i in m.processes_table.values():
-#     for j in i.segments_table.values():
-#         print(j, '\n')
-#
-# print(m.phys_memory_table)
-# m.load_segment('new', '2')
-# m.unload_segment('new', '2')
-# m.unload_segment('new', '1')
-# m.unload_segment('new', '3')
-# m.unload_segment('new', '4')
-# print(m.phys_memory_table)
-# print(m._free_memory_ranges())
-#
-# for i in m.processes_table.values():
-#     for j in i.segments_table.values():
-#         print(j, '\n')
-#
-# print(m.memory.read(0, 64))
